@@ -18,12 +18,13 @@ class Settings(BaseSettings):
     # Literature sources.
     openalex_mailto: str = ""           # polite-pool contact email, no key needed
     semantic_scholar_api_key: str = ""  # optional, raises rate limits
+    openalex_api_key: str = ""          # optional; helps when a shared IP is rate limited
     crossref_mailto: str = ""
 
     # Guardrails. A run fails closed once it crosses either limit.
     max_revisions: int = 4
     max_tokens_per_run: int = 400_000
-    min_verified_sources: int = 5
+    min_verified_sources: int = 3       # fewer than this and the run stops before spending tokens
     max_sources: int = 15               # keep only the most relevant verified sources
     abstract_chars: int = 400           # per-source abstract length sent to the model
 

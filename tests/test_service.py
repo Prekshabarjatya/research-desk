@@ -372,3 +372,27 @@ def test_cors_preflight_allows_delete_for_a_separately_hosted_ui(store, monkeypa
         "Origin": "https://desk.vercel.app", "Access-Control-Request-Method": "DELETE",
         "Access-Control-Request-Headers": "authorization"})
     assert r.status_code == 200 and "DELETE" in r.headers["access-control-allow-methods"]
+
+
+def test_a_source_shortfall_fails_the_run_clearly_and_retry_resumes_at_the_scout(store):
+    from app.models import Source
+    from app.nodes import Tools
+    live = {"up": False}
+    pool = [Source(title=f"Paper {i}", authors=["A. B"], year=2022, doi=f"10.1/p{i}") for i in range(1, 4)]
+    t = Tools(search=lambda q: list(pool) if live["up"] else [],
+              verify=lambda s: s.model_copy(update={"verified": True}))
+    llm = FakeLLM(script())
+    graph = build_graph(llm, t, MemorySaver())
+    run = store.create(PROMPT)
+    drain(store, graph)
+    store.approve(run["id"], approve())
+    drain(store, graph)
+    failed = store.get(run["id"])
+    assert failed["status"] == "failed" and "SourceShortfall" in failed["error"]
+    assert "thesis" not in llm.calls  # nothing was spent on drafting
+
+    live["up"] = True                       # the search recovers
+    assert store.retry(run["id"])
+    drain(store, graph)
+    assert store.get(run["id"])["gate"]["gate"] == "thesis"
+    assert llm.calls.count("analyst") == 1 and llm.calls.count("strategist") == 1

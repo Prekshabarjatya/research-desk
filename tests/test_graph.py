@@ -81,12 +81,17 @@ def test_rejected_topic_loops_back_with_feedback():
     assert llm.calls.count("strategist") == 2
 
 
-def test_unverified_sources_are_dropped_by_scout():
+def test_too_few_verified_sources_stops_the_run_before_any_drafting_tokens_are_spent():
+    from app.nodes import SourceShortfall
     t = Tools(search=lambda q: [Source(title="Fake", doi="10.9/fake")],
               verify=lambda s: s.model_copy(update={"verified": False}))
     llm = FakeLLM(script())
-    _, _, out = run(llm, t, decisions=[approve()])
-    assert out["sources"] == []
+    graph = build_graph(llm, t, MemorySaver())
+    cfg = {"configurable": {"thread_id": "t1"}, "recursion_limit": 60}
+    graph.invoke({"prompt": "x"}, cfg)
+    with pytest.raises(SourceShortfall, match="Only 0 verifiable sources"):
+        graph.invoke(Command(resume=approve()), cfg)
+    assert not {"thesis", "planner"} & set(llm.calls) and not any(c.startswith("writer") for c in llm.calls)
 
 
 def test_hallucinated_citation_is_caught_without_an_llm_critic_call():
@@ -169,6 +174,7 @@ def test_writer_shrinks_sections_after_an_overlong_draft():
 def test_scout_keeps_only_the_most_relevant_sources_up_to_the_cap(monkeypatch):
     from app import nodes
     monkeypatch.setattr(nodes.settings, "max_sources", 2)
+    monkeypatch.setattr(nodes.settings, "min_verified_sources", 1)
     pool = [
         Source(title="Edge intelligence for phones", doi="10.1/a", abstract="edge computing"),
         Source(title="AI routing cuts logistics cost", doi="10.1/b", abstract="routing optimization logistics"),

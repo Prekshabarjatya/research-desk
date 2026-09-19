@@ -5,6 +5,7 @@ so a crash or deploy loses at most the node that was executing."""
 import logging
 import signal
 import threading
+import time
 from datetime import UTC, datetime
 
 import httpx
@@ -173,7 +174,11 @@ def build_worker():
     saver.setup()
 
     http = httpx.Client(headers={"User-Agent": "research-paper-agents/0.1"})
-    tools = Tools(search=lambda q: search_all(q, http), verify=lambda s: verify_source(s, http))
+    def paced_search(query: str):
+        time.sleep(0.5)  # free APIs throttle bursts; a short gap between queries avoids most 429s
+        return search_all(query, http)
+
+    tools = Tools(search=paced_search, verify=lambda s: verify_source(s, http))
     return store, build_graph(RoutedLLM(build_providers()), tools, saver)
 
 

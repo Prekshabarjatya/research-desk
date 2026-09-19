@@ -29,6 +29,10 @@ UNTRUSTED = (
 )
 
 
+class SourceShortfall(RuntimeError):
+    """Too few verifiable sources to write a paper. Raised before any drafting tokens are spent."""
+
+
 @dataclass
 class Tools:
     search: Callable[[str], list[Source]]   # query -> unverified sources
@@ -123,9 +127,14 @@ def make_scout(llm: LLM, tools: Tools):
                 continue  # unverifiable sources are dropped, not kept "just in case"
             known.append(verified.model_copy(update={"id": f"S{next_id}"}))
             next_id += 1
+        if len(known) < settings.min_verified_sources:
+            raise SourceShortfall(
+                f"Only {len(known)} verifiable sources were found from {len(candidates)} candidates "
+                f"(need at least {settings.min_verified_sources}). The literature search may be rate limited, "
+                "or the topic may be too narrow. Retry shortly, or try a broader topic.")
         return {
             "sources": [s.model_dump() for s in known],
-            "log": [f"scout: {len(known)} verified sources"],
+            "log": [f"scout: {len(known)} verified sources from {len(candidates)} candidates"],
         }
 
     return scout

@@ -136,6 +136,7 @@
     }
     if (/429|rate limit/i.test(e)) return 'The model provider is rate limiting this account. Wait a minute, then retry.';
     if (/BudgetExceeded/.test(e)) return 'The run used more than its token limit, so it was stopped to control cost.';
+    if (/SourceShortfall/.test(e)) return 'Not enough verifiable sources were found. The literature search may be rate limited, or the topic may be too narrow. Retry in a minute, or try a broader topic.';
     if (/All providers failed/.test(e)) return 'Every configured model provider failed for one step.';
     return 'Something went wrong while working on this paper.';
   }
