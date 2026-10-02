@@ -1,6 +1,8 @@
+import time
+
 import pytest
 
-from app.llm import Completion, LLMError, RoutedLLM
+from app.llm import Completion, LLMError, RoutedLLM, _with_deadline
 from app.models import Critique
 
 
@@ -74,3 +76,16 @@ def test_oversized_requests_are_not_retried():
     with pytest.raises(LLMError):
         llm(a).complete("s", "u")
     assert a.n == 1
+
+
+def test_deadline_stops_a_call_that_never_answers():
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        _with_deadline(lambda: time.sleep(5), 0.1)
+    assert time.monotonic() - started < 1
+
+
+def test_deadline_passes_results_and_errors_through():
+    assert _with_deadline(lambda: "ok", 1) == "ok"
+    with pytest.raises(TooLarge):
+        _with_deadline(lambda: (_ for _ in ()).throw(TooLarge("too big")), 1)

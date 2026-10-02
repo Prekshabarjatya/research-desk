@@ -7,6 +7,7 @@ can change without touching agent code."""
 import json
 import logging
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Literal, Protocol, TypeVar
@@ -56,6 +57,28 @@ class Provider(Protocol):
     def invoke(self, system: str, user: str, tier: Tier) -> Completion: ...
 
 
+def _with_deadline(fn, seconds: float):
+    """Run fn() but give up after `seconds` of wall-clock time. The HTTP client's timeout only
+    limits the gap between bytes, and OpenRouter can keep a slow request alive indefinitely.
+    The abandoned call finishes (or fails) in its daemon thread and its result is dropped."""
+    box: dict = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as exc:  # noqa: BLE001  re-raised in the caller's thread
+            box["error"] = exc
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise TimeoutError(f"no answer within {seconds:.0f}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
 class _LangChainProvider:
     def __init__(self, name: str, chat_fast, chat_strong):
         self.name = name
@@ -64,7 +87,8 @@ class _LangChainProvider:
     def invoke(self, system: str, user: str, tier: Tier) -> Completion:
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        resp = self._chat[tier].invoke([SystemMessage(content=system), HumanMessage(content=user)])
+        messages = [SystemMessage(content=system), HumanMessage(content=user)]
+        resp = _with_deadline(lambda: self._chat[tier].invoke(messages), settings.llm_timeout_seconds)
         content = resp.content
         if isinstance(content, list):
             content = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
@@ -83,7 +107,7 @@ def _openai_compatible(name: str, base_url: str, api_key: str, fast: str, strong
     def mk(model: str, temp: float):
         return ChatOpenAI(
             model=model, base_url=base_url, api_key=api_key, temperature=temp, extra_body=extra_body,
-            timeout=settings.llm_timeout_seconds,  # the client default is no timeout at all
+            timeout=settings.llm_timeout_seconds,  # idle limit; _with_deadline caps the whole call
             max_retries=0,  # RoutedLLM retries and logs each try; client retries would multiply them unseen
         )
 
