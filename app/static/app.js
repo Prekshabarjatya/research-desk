@@ -128,9 +128,9 @@
 
   function friendlyError(err) {
     const e = err || '';
-    if (/401|invalid api key|invalid_api_key/i.test(e)) return 'The model provider rejected the API key. Check GROQ_API_KEY on the server, then retry.';
+    if (/401|invalid api key|invalid_api_key/i.test(e)) return 'The model provider rejected the API key. Check OPENROUTER_API_KEY on the server, then retry.';
     if (/413|too large|tokens per minute/i.test(e)) return 'A request was larger than the model provider allows per minute. Retrying after a short wait usually works.';
-    if (/tokens per day|\bTPD\b/i.test(e)) {
+    if (/tokens per day|\bTPD\b|free-models-per-day/i.test(e)) {
       const wait = e.match(/try again in ((?:\d+h)?(?:\d+m)?(?:[\d.]+s)?)/i);
       return 'The daily token allowance for this model is used up.' + (wait && wait[1] ? ` The provider says to try again in about ${wait[1].replace(/\.\d+s/, 's')}.` : '') + ' A paid tier removes this limit.';
     }

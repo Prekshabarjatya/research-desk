@@ -2,7 +2,7 @@
 canned sources, so every screen can be exercised with no API key, no database and no network.
 
     .venv/bin/python scripts/dev_server.py          # scripted fixture, http://127.0.0.1:8765, token: dev
-    .venv/bin/python scripts/dev_server.py --live   # real Groq + real source search (needs .env)
+    .venv/bin/python scripts/dev_server.py --live   # real OpenRouter model + real source search (needs .env)
 
 Keywords in the assignment pick a scenario: "fail" stops the run at the planner (as a bad key
 would), "review" makes the reviewer reject every draft until the revision cap. Anything else
@@ -76,7 +76,7 @@ class DevLLM:
                                                              "customer density delivery window last mile"]}), 350
         if purpose == "planner":
             if self.scenario == "fail":
-                raise LLMError("All providers failed for 'planner': [\"groq: Error code: 401 - {'error': {'message': 'Invalid API Key'}}\"]")
+                raise LLMError("All providers failed for 'planner': [\"openrouter: Error code: 401 - {'error': {'message': 'Invalid API Key'}}\"]")
             plan = [("Introduction", "Frame the cost problem", ["S1", "S2", "S3"]),
                     ("Literature Review", "Survey the approaches", ["S1", "S2", "S3", "S5", "S6"]),
                     ("Analysis", "Weigh the evidence", ["S2", "S3", "S4", "S6"]),
@@ -113,7 +113,7 @@ def main():
         store = MemoryRunStore()
         graph = build_graph(llm, tools, MemorySaver())
         threading.Thread(target=run_forever, args=(store, graph), daemon=True).start()
-        print("LIVE dev server: http://127.0.0.1:8765  token: dev  (real Groq + real sources, uses your quota)")
+        print("LIVE dev server: http://127.0.0.1:8765  token: dev  (real OpenRouter model + real sources, uses your quota)")
         uvicorn.run(create_app(store), host="127.0.0.1", port=8765, log_level="warning")
         return
     settings.max_revisions = 2

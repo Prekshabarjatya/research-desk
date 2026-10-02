@@ -4,10 +4,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Primary LLM provider (Groq).
-    groq_api_key: str = ""
-    groq_model_fast: str = "openai/gpt-oss-20b"    # parsing, queries, outline
-    groq_model_strong: str = "openai/gpt-oss-120b"  # drafting, critique
+    # Primary LLM provider (OpenRouter, OpenAI-compatible).
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model_fast: str = "nvidia/nemotron-3.5-lightning:free"    # parsing, queries, outline
+    openrouter_model_strong: str = "nvidia/nemotron-3-ultra-550b-a55b:free"  # thesis, drafting, critique
+    openrouter_reasoning: bool = True
+    # Only this provider's endpoints, no fallbacks. A bare slug like "nvidia" matches all of its
+    # endpoints (Lightning's is tagged "nvidia/nvfp4", Ultra's "nvidia"). Empty lets OpenRouter route.
+    openrouter_provider: str = "nvidia"
 
     # Optional fallback provider, any OpenAI-compatible endpoint.
     fallback_base_url: str = ""

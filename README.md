@@ -56,7 +56,7 @@ has historically expired after a limited period. Confirm current limits on both 
 1. Create a free Neon project and copy its **direct** (not pooled) connection string. It must include
    `sslmode=require`.
 2. Push this repo to GitHub. In Render choose New > Blueprint and select the repo.
-3. When prompted, enter `DATABASE_URL` (the Neon string) and `GROQ_API_KEY`. Render generates `API_TOKEN`:
+3. When prompted, enter `DATABASE_URL` (the Neon string) and `OPENROUTER_API_KEY`. Render generates `API_TOKEN`:
    open the service's Environment tab to read it. That token is the password on the sign-in screen.
 4. Open the service URL, sign in, and start a paper.
 
@@ -82,7 +82,7 @@ You do not need this: the Render service already serves the UI.
 ### One VM with Docker Compose
 
 ```bash
-cp .env.example .env               # set GROQ_API_KEY, POSTGRES_PASSWORD, API_TOKEN, DOMAIN
+cp .env.example .env               # set OPENROUTER_API_KEY, POSTGRES_PASSWORD, API_TOKEN, DOMAIN
 docker compose up -d --build       # db, api, worker, caddy (automatic HTTPS for $DOMAIN)
 ```
 
@@ -122,15 +122,18 @@ rather than whatever the final rewrite produced.
 Restore was drilled end to end (backup, drop all tables, restore, rows and checkpoints back).
 Repeat the drill after any schema change.
 
-## Known limits (from live runs against Groq)
+## Known limits (from live runs, first against Groq)
 
 - **Word limits are approximate.** The model overshoots per-section targets by up to about 35%.
   The pipeline measures real length on the rendered text, rescales, and rewrites, and it usually
   lands in range within 2 to 3 drafts, but not always. Expect some runs to end `needs_human_review`.
-- **Free-tier token caps shape the design.** Groq's on-demand tier allows 8,000 tokens per minute for
-  `gpt-oss-120b`, counted per request. Prompts are therefore bounded: at most `MAX_SOURCES` (15) ranked
-  sources, abstracts truncated, and the critic sees only the body and the sources it cites. A paid tier
-  removes this pressure.
+- **Free-tier limits shape the design.** The prompts were sized for Groq's on-demand tier (8,000 tokens per
+  minute for `gpt-oss-120b`, counted per request): at most `MAX_SOURCES` (15) ranked sources, abstracts
+  truncated, and the critic sees only the body and the sources it cites. The default models are now
+  OpenRouter's free `nvidia/nemotron-3.5-lightning:free` (analysis, queries, outline) and
+  `nvidia/nemotron-3-ultra-550b-a55b:free` (thesis, drafting, critique), which cap requests per minute
+  and per day rather than tokens. One paper makes roughly 10 to 40 calls (more with revisions), so a few papers
+  can use up the daily cap; check the current limits in OpenRouter.
 - **Claim-level accuracy is only partly checked.** Sources are verified to exist; whether each sentence
   is faithfully supported by its source is judged by the LLM critic, which is not proof. The writer is
   told not to state statistics absent from the abstracts, and the critic flags unsupported ones.

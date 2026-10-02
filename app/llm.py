@@ -17,7 +17,7 @@ from app.config import settings
 
 log = logging.getLogger("llm")
 Tier = Literal["fast", "strong"]
-WARN_PROMPT_TOKENS = 6000  # rough; free-tier per-minute limits can be as low as 8k for a whole request
+WARN_PROMPT_TOKENS = 6000  # rough; keeps prompts small enough for free-tier providers
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -25,10 +25,10 @@ class BudgetExceeded(RuntimeError):
     """The run crossed its token ceiling. The run fails closed with partial state."""
 
 
-# Client errors that retrying cannot fix (bad key, bad model name, malformed request).
+# Client errors that retrying cannot fix (bad key, no credits, bad model name, malformed request).
 # 413 is a too-large request: resending it unchanged cannot succeed.
 # Rate limits (429) and server errors (5xx) are NOT here: those are worth retrying.
-NON_RETRYABLE_STATUS = {400, 401, 403, 404, 413, 422}
+NON_RETRYABLE_STATUS = {400, 401, 402, 403, 404, 413, 422}
 
 
 class LLMError(RuntimeError):
@@ -71,32 +71,36 @@ class _LangChainProvider:
         return Completion(text=content.strip(), tokens=int(usage.get("total_tokens", 0)))
 
 
+def _openai_compatible(name: str, base_url: str, api_key: str, fast: str, strong: str,
+                       extra_body: dict | None = None) -> Provider:
+    from langchain_openai import ChatOpenAI
+
+    def mk(model: str, temp: float):
+        return ChatOpenAI(
+            model=model, base_url=base_url, api_key=api_key, temperature=temp, extra_body=extra_body,
+        )
+
+    return _LangChainProvider(name, mk(fast or strong, 0.2), mk(strong or fast, 0.3))
+
+
 def build_providers() -> list[Provider]:
     providers: list[Provider] = []
-    if settings.groq_api_key:
-        from langchain_groq import ChatGroq
-
+    if settings.openrouter_api_key:
+        # Every call is a fresh system + user exchange, so there is no reasoning_details to pass back.
+        body: dict = {"reasoning": {"enabled": settings.openrouter_reasoning}}
+        if settings.openrouter_provider:
+            body["provider"] = {"only": [settings.openrouter_provider], "allow_fallbacks": False}
         providers.append(
-            _LangChainProvider(
-                "groq",
-                ChatGroq(model=settings.groq_model_fast, api_key=settings.groq_api_key, temperature=0.2),
-                ChatGroq(model=settings.groq_model_strong, api_key=settings.groq_api_key, temperature=0.3),
+            _openai_compatible(
+                "openrouter", settings.openrouter_base_url, settings.openrouter_api_key,
+                settings.openrouter_model_fast, settings.openrouter_model_strong, body,
             )
         )
     if settings.fallback_base_url and settings.fallback_api_key:
-        from langchain_openai import ChatOpenAI
-
-        def mk(model: str, temp: float):
-            return ChatOpenAI(
-                model=model, base_url=settings.fallback_base_url,
-                api_key=settings.fallback_api_key, temperature=temp,
-            )
-
         providers.append(
-            _LangChainProvider(
-                "fallback",
-                mk(settings.fallback_model_fast or settings.fallback_model_strong, 0.2),
-                mk(settings.fallback_model_strong or settings.fallback_model_fast, 0.3),
+            _openai_compatible(
+                "fallback", settings.fallback_base_url, settings.fallback_api_key,
+                settings.fallback_model_fast, settings.fallback_model_strong,
             )
         )
     return providers
@@ -105,7 +109,7 @@ def build_providers() -> list[Provider]:
 class RoutedLLM:
     def __init__(self, providers: list[Provider], *, retries: int = 3, base_delay: float = 2.0):
         if not providers:
-            raise LLMError("No LLM provider configured: set GROQ_API_KEY (and optionally FALLBACK_*).")
+            raise LLMError("No LLM provider configured: set OPENROUTER_API_KEY (and optionally FALLBACK_*).")
         self.providers = providers
         self.retries = retries
         self.base_delay = base_delay
