@@ -39,6 +39,7 @@ class LLMError(RuntimeError):
 class Completion:
     text: str
     tokens: int
+    reasoning_tokens: int = 0
 
 
 class LLM(Protocol):
@@ -68,7 +69,11 @@ class _LangChainProvider:
         if isinstance(content, list):
             content = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
         usage = getattr(resp, "usage_metadata", None) or {}
-        return Completion(text=content.strip(), tokens=int(usage.get("total_tokens", 0)))
+        return Completion(
+            text=content.strip(),
+            tokens=int(usage.get("total_tokens", 0)),
+            reasoning_tokens=int((usage.get("output_token_details") or {}).get("reasoning", 0)),
+        )
 
 
 def _openai_compatible(name: str, base_url: str, api_key: str, fast: str, strong: str,
@@ -78,6 +83,8 @@ def _openai_compatible(name: str, base_url: str, api_key: str, fast: str, strong
     def mk(model: str, temp: float):
         return ChatOpenAI(
             model=model, base_url=base_url, api_key=api_key, temperature=temp, extra_body=extra_body,
+            timeout=settings.llm_timeout_seconds,  # the client default is no timeout at all
+            max_retries=0,  # RoutedLLM retries and logs each try; client retries would multiply them unseen
         )
 
     return _LangChainProvider(name, mk(fast or strong, 0.2), mk(strong or fast, 0.3))
@@ -121,13 +128,24 @@ class RoutedLLM:
         errors: list[str] = []
         for provider in self.providers:
             for attempt in range(self.retries):
+                started = time.monotonic()
                 try:
-                    return provider.invoke(system, user, tier)
+                    result = provider.invoke(system, user, tier)
                 except Exception as exc:  # noqa: BLE001  rate limit, timeout, 5xx; not distinguishable across SDKs
                     errors.append(f"{provider.name}: {exc}")
+                    log.warning(
+                        "%s %s '%s' failed after %.0fs (try %d/%d): %s", provider.name, tier, purpose,
+                        time.monotonic() - started, attempt + 1, self.retries, exc,
+                    )
                     if getattr(exc, "status_code", None) in NON_RETRYABLE_STATUS:
                         break  # go straight to the next provider
                     time.sleep(self.base_delay * (2**attempt))
+                    continue
+                log.info(
+                    "%s %s '%s': %.0fs, %d tokens (%d reasoning)", provider.name, tier, purpose,
+                    time.monotonic() - started, result.tokens, result.reasoning_tokens,
+                )
+                return result
             # exhausted retries on this provider, fall through to the next one
         raise LLMError(f"All providers failed for '{purpose}': {errors[-3:]}")
 

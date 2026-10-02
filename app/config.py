@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # Only this provider's endpoints, no fallbacks. A bare slug like "nvidia" matches all of its
     # endpoints (Lightning's is tagged "nvidia/nvfp4", Ultra's "nvidia"). Empty lets OpenRouter route.
     openrouter_provider: str = "nvidia"
+    llm_timeout_seconds: float = 300  # per request; a stalled free endpoint otherwise hangs the run
 
     # Optional fallback provider, any OpenAI-compatible endpoint.
     fallback_base_url: str = ""
