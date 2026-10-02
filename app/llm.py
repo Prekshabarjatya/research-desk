@@ -178,7 +178,7 @@ class RoutedLLM:
     ) -> tuple[T, int]:
         instruction = (
             f"{system}\n\nRespond with ONLY a JSON object matching this schema, no prose, no code fences:\n"
-            f"{json.dumps(schema.model_json_schema())}"
+            f"{json.dumps(prompt_schema(schema.model_json_schema()))}"
         )
         first = self.complete(instruction, user, tier=tier, purpose=purpose)
         try:
@@ -200,9 +200,51 @@ class RoutedLLM:
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
 
+def prompt_schema(node):
+    """A JSON schema without pydantic's "title" labels. Small models copy a property's
+    {"title": "Topic", "type": "string"} as its value and return an object for a string field.
+    Keys under "properties" and "$defs" are field and model names, so those are kept."""
+    if isinstance(node, list):
+        return [prompt_schema(v) for v in node]
+    if not isinstance(node, dict):
+        return node
+    return {
+        k: {name: prompt_schema(sub) for name, sub in v.items()} if k in ("properties", "$defs")
+        else prompt_schema(v)
+        for k, v in node.items() if k != "title"
+    }
+
+
 def parse_json(text: str, schema: type[T]) -> T:
     cleaned = _FENCE.sub("", text.strip())
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("no JSON object found")
-    return schema.model_validate(json.loads(cleaned[start : end + 1]))
+    data = json.loads(cleaned[start : end + 1])
+    try:
+        return schema.model_validate(data)
+    except ValidationError as exc:
+        if not _unwrap_strings(data, exc):
+            raise
+        return schema.model_validate(data)
+
+
+def _unwrap_strings(data, exc: ValidationError) -> bool:
+    """Replace a string field that came back wrapped in an object holding exactly one string,
+    e.g. {"topic": {"title": "..."}}, with that string. Returns whether anything changed."""
+    changed = False
+    for err in exc.errors():
+        if err["type"] != "string_type" or not isinstance(err["input"], dict):
+            continue
+        strings = [v for v in err["input"].values() if isinstance(v, str)]
+        if len(strings) != 1:
+            continue
+        try:
+            parent = data
+            for key in err["loc"][:-1]:
+                parent = parent[key]
+            parent[err["loc"][-1]] = strings[0]
+        except (KeyError, IndexError, TypeError):
+            continue
+        changed = True
+    return changed

@@ -2,8 +2,8 @@ import time
 
 import pytest
 
-from app.llm import Completion, LLMError, RoutedLLM, _with_deadline
-from app.models import Critique
+from app.llm import Completion, LLMError, RoutedLLM, _with_deadline, parse_json, prompt_schema
+from app.models import Critique, Outline, TopicProposal
 
 
 class Flaky:
@@ -89,3 +89,24 @@ def test_deadline_passes_results_and_errors_through():
     assert _with_deadline(lambda: "ok", 1) == "ok"
     with pytest.raises(TooLarge):
         _with_deadline(lambda: (_ for _ in ()).throw(TooLarge("too big")), 1)
+
+
+def test_prompt_schema_drops_labels_but_keeps_a_field_named_title():
+    schema = prompt_schema(Outline.model_json_schema())
+    section = schema["$defs"]["SectionPlan"]
+    assert "title" not in schema and "title" not in section
+    assert section["properties"]["title"] == {"type": "string"}  # the real field survives
+    assert "title" not in prompt_schema(TopicProposal.model_json_schema())["properties"]["topic"]
+
+
+def test_a_string_field_wrapped_in_an_object_is_unwrapped():
+    # Seen live: a small model answered {"topic": {"title": "..."}} for a string field.
+    p = parse_json('{"topic": {"title": "Risk-Tiered Reporting"}, "search_queries": ["a"]}', TopicProposal)
+    assert p.topic == "Risk-Tiered Reporting"
+    o = parse_json('{"sections": [{"title": {"text": "Intro"}, "goal": "g"}]}', Outline)
+    assert o.sections[0].title == "Intro"
+
+
+def test_an_object_that_is_not_a_single_string_still_fails():
+    with pytest.raises(ValueError):
+        parse_json('{"topic": {"title": "A", "subtitle": "B"}}', TopicProposal)
